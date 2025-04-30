@@ -6,25 +6,28 @@ using RJCP.IO.Ports;
 namespace SerialSharp.Reader
 {
     /// <summary>
-    /// 基于长度字段解析串口返回数据的读取器。
-    /// 会持续读取串口，直到读到的字节数满足数据段长度字段 + 固定长度，即认为数据包完整。
+    /// Serial data reader based on a length field strategy.
+    /// Continuously reads from the serial port until the number of received bytes
+    /// satisfies the expected total length, calculated from a fixed-length offset and data segment length.
     /// </summary>
-    /// <param name="serialPort"></param>
+    /// <param name="serialPort">The serial port stream used for reading.</param>
+    /// <param name="config">Reader configuration containing offset and length parameters.</param>
     public class SerialReaderLengthBased(
         SerialPortStream serialPort,
         LengthBasedReaderConfig config)
         : ISerialReader
     {
         /// <summary>
-        /// 异步读取串口数据，直到根据长度字段判断数据包接收完成。
+        /// Asynchronously reads data from the serial port until a complete packet is received,
+        /// determined by the length field and fixed-length header/footer.
         /// </summary>
-        /// <param name="cancellationToken">用于取消接收操作的令牌。</param>
-        /// <returns>接收到的完整数据包，或在超限/取消时抛出异常。</returns>
+        /// <param name="cancellationToken">Cancellation token to interrupt the read operation.</param>
+        /// <returns>The received complete byte array, or throws an exception if cancelled or invalid.</returns>
         public async Task<byte[]?> ReadAsync(CancellationToken cancellationToken = default)
         {
-            var buffer = ArrayPool<byte>.Shared.Rent(config.ChunkSize); // 临时缓冲区，避免频繁分配
-            var totalLength = 0; // 预期完整包总长度
-            var count = 0;       // 当前已读取字节数
+            var tempBuffer = ArrayPool<byte>.Shared.Rent(config.ChunkSize); // Temporary buffer to avoid heap allocations
+            var expectedPacketLength = 0; // Expected total length of the packet
+            var totalBytesRead = 0;       // Current number of bytes read
 
             try
             {
@@ -32,47 +35,43 @@ namespace SerialSharp.Reader
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var bytesToRead = serialPort.BytesToRead;
-                    if (bytesToRead > 0)
+                    var availableBytes = serialPort.BytesToRead;
+                    if (availableBytes > 0)
                     {
-                        // 计算最多可读多少字节（避免溢出）
-                        var maxRead = Math.Min(buffer.Length - count, bytesToRead);
+                        // Prevent overflow by calculating the safe read size
+                        var readLength = Math.Min(tempBuffer.Length - totalBytesRead, availableBytes);
 
-                        // 读取串口数据
-                        var bytesRead = await serialPort.ReadAsync(buffer, count, maxRead, cancellationToken);
-                        count += bytesRead;
+                        // Perform async read
+                        var bytesRead = await serialPort.ReadAsync(tempBuffer, totalBytesRead, readLength, cancellationToken);
+                        totalBytesRead += bytesRead;
 
-                        // 一旦数据超过长度字段位置，且尚未确定总长度
-                        if (count > config.DataSegmentsByteIndex && totalLength == 0)
+                        // Determine expected total length once enough bytes are available to read the length field
+                        if (totalBytesRead > config.DataSegmentsByteIndex && expectedPacketLength == 0)
                         {
-                            // 提取数据段长度字段的值
-                            var dataSegLen = buffer[config.DataSegmentsByteIndex];
+                            var dataSegmentLength = tempBuffer[config.DataSegmentsByteIndex];
+                            expectedPacketLength = config.TotalExceptDataSegLength + dataSegmentLength;
 
-                            // 计算完整数据包长度（固定部分 + 数据段）
-                            totalLength = config.TotalExceptDataSegLength + dataSegLen;
-
-                            // 安全保护：如果超出最大读取范围则视为异常
-                            if (totalLength > config.ReadMaxSize)
-                                throw new InvalidOperationException($"接收数据超出最大限制 {config.ReadMaxSize} 字节");
+                            if (expectedPacketLength > config.ReadMaxSize)
+                                throw new InvalidOperationException($"Received data exceeds the maximum allowed size of {config.ReadMaxSize} bytes");
                         }
 
-                        // 如果读满了完整包长度，返回结果
-                        if (totalLength > 0 && count >= totalLength)
+                        // If the buffer has reached the expected total length, return the packet
+                        if (expectedPacketLength > 0 && totalBytesRead >= expectedPacketLength)
                         {
-                            var result = new byte[totalLength];
-                            Array.Copy(buffer, result, totalLength);
+                            var result = new byte[expectedPacketLength];
+                            Array.Copy(tempBuffer, result, expectedPacketLength);
                             return result;
                         }
                     }
 
-                    // 没有数据，稍作等待避免 CPU 空转
+                    // Wait briefly to reduce CPU usage when no data is available
                     await Task.Delay(1, cancellationToken);
                 }
             }
             finally
             {
-                // 归还临时缓冲区，防止内存泄漏
-                ArrayPool<byte>.Shared.Return(buffer);
+                // Return the rented buffer to the pool to avoid memory leaks
+                ArrayPool<byte>.Shared.Return(tempBuffer);
             }
         }
     }

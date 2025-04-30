@@ -1,16 +1,15 @@
 ﻿namespace SerialSharp.Core
 {
     /// <summary>
-    /// 表示一个可执行的串口命令。
-    /// 所有需要通过 <see cref="SerialComChannel" /> 调度执行的命令类型都应实现此接口。
+    /// Represents a serial command that can be executed by a communication channel.
+    /// Implementations define how the command is sent and how the response is processed.
     /// </summary>
     public interface IExecutableCommand
     {
         /// <summary>
-        /// 在指定通道上异步执行命令逻辑。
+        /// Executes the command asynchronously on the specified serial communication channel.
         /// </summary>
-        /// <param name="channel">当前命令所依附的串口通道。</param>
-        /// <returns>表示命令执行过程的异步任务。</returns>
+        /// <param name="channel">The serial communication channel to execute the command on.</param>
         Task ExecuteAsync(SerialComChannel channel);
     }
 }

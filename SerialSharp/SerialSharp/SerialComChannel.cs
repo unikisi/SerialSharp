@@ -7,13 +7,17 @@ using System.Threading.Channels;
 
 namespace SerialSharp
 {
+    /// <summary>
+    /// Represents a single serial communication channel.
+    /// Manages serial port lifecycle, command queue execution, and response handling.
+    /// </summary>
     public class SerialComChannel
     {
-        private readonly SerialPortStream _port;
+        private readonly SerialPortStream _serialPort;
         private readonly Channel<IExecutableCommand> _commandQueue;
         private readonly ISerialReader _reader;
-        private SerialPortConfig _portConfig;
-        private CancellationTokenSource _cts = new();
+        private SerialPortConfig _serialPortConfig;
+        private CancellationTokenSource _channelCts = new();
         private readonly Action<string>? _logger;
 
         public string Name { get; }
@@ -22,9 +26,9 @@ namespace SerialSharp
         {
             Name = name;
             _logger = logger;
-            _portConfig = portConfig;
+            _serialPortConfig = portConfig;
 
-            _port = new SerialPortStream(portConfig.Port, portConfig.BaudRate)
+            _serialPort = new SerialPortStream(portConfig.Port, portConfig.BaudRate)
             {
                 DataBits = portConfig.DataBits,
                 Parity = (Parity)portConfig.Parity,
@@ -36,100 +40,108 @@ namespace SerialSharp
             _reader = protocolConfig.ReaderType switch
             {
                 SerialReaderType.LengthBased => new SerialReaderLengthBased(
-                    _port,
+                    _serialPort,
                     config: (LengthBasedReaderConfig)protocolConfig.ReaderConfig
                 ),
 
                 SerialReaderType.TimeoutBased => new SerialReaderTimeoutBased(
-                    _port,
+                    _serialPort,
                     config: (TimeoutBasedReaderConfig)protocolConfig.ReaderConfig
                 ),
 
-                _ => throw new NotSupportedException($"未知读取类型：{protocolConfig.ReaderType}")
+                _ => throw new NotSupportedException($"Unsupported reader type: {protocolConfig.ReaderType}")
             };
 
             _commandQueue = Channel.CreateUnbounded<IExecutableCommand>();
-            _ = Task.Run(ProcessLoopAsync);
+            _ = Task.Run(ProcessCommandLoopAsync);
         }
 
+        /// <summary>
+        /// Updates the serial port configuration. Can only be called when disconnected.
+        /// </summary>
         public void UpdateConfig(SerialPortConfig newConfig)
         {
-            if (_port.IsOpen)
-                throw new InvalidOperationException($"[{Name}] 更新配置前必须先断开串口连接。");
+            if (_serialPort.IsOpen)
+                throw new InvalidOperationException($"[{Name}] Port must be disconnected before updating config.");
 
-            _portConfig = newConfig;
-            _logger?.Invoke($"[{Name}] 已更新串口配置。");
+            _serialPortConfig = newConfig;
+            _logger?.Invoke($"[{Name}] Serial port configuration updated.");
         }
 
-
+        /// <summary>
+        /// Opens the serial port connection.
+        /// </summary>
         public void Connect()
         {
-            if (_port.IsOpen)
+            if (_serialPort.IsOpen)
                 return;
 
             try
             {
-                _port.PortName = _portConfig.Port;
-                _port.BaudRate = _portConfig.BaudRate;
-                _port.DataBits = _portConfig.DataBits;
-                _port.Parity = (Parity)_portConfig.Parity;
-                _port.StopBits = (StopBits)_portConfig.StopBits;
+                _serialPort.PortName = _serialPortConfig.Port;
+                _serialPort.BaudRate = _serialPortConfig.BaudRate;
+                _serialPort.DataBits = _serialPortConfig.DataBits;
+                _serialPort.Parity = (Parity)_serialPortConfig.Parity;
+                _serialPort.StopBits = (StopBits)_serialPortConfig.StopBits;
 
-                _port.Open();
-                _logger?.Invoke($"[{Name}] 串口已连接，波特率={_port.BaudRate}");
+                _serialPort.Open();
+                _logger?.Invoke($"[{Name}] Port connected. BaudRate={_serialPort.BaudRate}");
             }
             catch (UnauthorizedAccessException ex)
             {
-                var msg = $"[{Name}] 串口被占用或无权限：{ex.Message}";
+                var msg = $"[{Name}] Port is busy or access denied: {ex.Message}";
                 _logger?.Invoke(msg);
                 throw new IOException(msg, ex);
             }
             catch (IOException ex)
             {
-                var msg = $"[{Name}] 串口不存在或硬件故障：{ex.Message}";
+                var msg = $"[{Name}] Port not found or hardware failure: {ex.Message}";
                 _logger?.Invoke(msg);
                 throw new IOException(msg, ex);
             }
             catch (Exception ex)
             {
-                var msg = $"[{Name}] 串口连接失败：{ex.Message}";
+                var msg = $"[{Name}] Failed to connect port: {ex.Message}";
                 _logger?.Invoke(msg);
                 throw new IOException(msg, ex);
             }
         }
 
+        /// <summary>
+        /// Closes the serial port connection.
+        /// </summary>
         public void Disconnect()
         {
             try
             {
-                _port.Close();
-                _logger?.Invoke($"[{Name}] 串口已断开");
+                _serialPort.Close();
+                _logger?.Invoke($"[{Name}] Port disconnected.");
             }
             catch (Exception ex)
             {
-                _logger?.Invoke($"[{Name}] 串口断开失败：{ex.Message}");
+                _logger?.Invoke($"[{Name}] Failed to disconnect port: {ex.Message}");
                 throw;
             }
         }
 
         /// <summary>
-        /// 当前串口是否已连接
+        /// Indicates whether the serial port is currently open.
         /// </summary>
-        public bool IsConnected()
-        {
-            return _port.IsOpen;
-        }
+        public bool IsConnected() => _serialPort.IsOpen;
 
+        /// <summary>
+        /// Adds a serial command to the processing queue.
+        /// </summary>
         public async Task WriteAsync<T>(SerialCommand<T> command)
         {
             await _commandQueue.Writer.WriteAsync(command);
         }
 
-        private async Task ProcessLoopAsync()
+        private async Task ProcessCommandLoopAsync()
         {
             try
             {
-                while (await _commandQueue.Reader.WaitToReadAsync(_cts.Token))
+                while (await _commandQueue.Reader.WaitToReadAsync(_channelCts.Token))
                 {
                     while (_commandQueue.Reader.TryRead(out var command))
                     {
@@ -139,16 +151,19 @@ namespace SerialSharp
             }
             catch (Exception ex)
             {
-                _logger?.Invoke($"[{Name}] 通道异常：{ex.Message}");
+                _logger?.Invoke($"[{Name}] Command loop error: {ex.Message}");
             }
         }
 
-        private void CancelPendingQueue()
+        private void ClearPendingQueue()
         {
-            _logger?.Invoke($"[{Name}] 清空队列中剩余命令");
+            _logger?.Invoke($"[{Name}] Clearing pending commands in queue.");
             while (_commandQueue.Reader.TryRead(out _)) { }
         }
 
+        /// <summary>
+        /// Executes the specified serial command with retry and timeout support.
+        /// </summary>
         public async Task ExecuteCommandAsync<T>(SerialCommand<T> cmd)
         {
             var attempt = 0;
@@ -160,9 +175,8 @@ namespace SerialSharp
 
                 try
                 {
-
-                    _logger?.Invoke($"[{Name}] → 发送：{BitConverter.ToString(cmd.RequestBytes)} (第{attempt + 1}次尝试)");
-                    await _port.WriteAsync(cmd.RequestBytes, 0, cmd.RequestBytes.Length, _cts.Token);
+                    _logger?.Invoke($"[{Name}] → Sending: {BitConverter.ToString(cmd.RequestBytes)} (Attempt {attempt + 1})");
+                    await _serialPort.WriteAsync(cmd.RequestBytes, 0, cmd.RequestBytes.Length, _channelCts.Token);
 
                     if (cmd.SkipRead)
                     {
@@ -172,17 +186,17 @@ namespace SerialSharp
 
                     if (cmd.DelayBeforeReadMs > 0)
                     {
-                        _logger?.Invoke($"[{Name}] 等待 {cmd.DelayBeforeReadMs}ms 再开始读取响应...");
-                        await Task.Delay(cmd.DelayBeforeReadMs, _cts.Token);
+                        _logger?.Invoke($"[{Name}] Waiting {cmd.DelayBeforeReadMs}ms before reading response...");
+                        await Task.Delay(cmd.DelayBeforeReadMs, _channelCts.Token);
                     }
 
                     timeoutCts = new CancellationTokenSource(cmd.TimeoutMs);
-                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, timeoutCts.Token);
+                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_channelCts.Token, timeoutCts.Token);
 
                     var response = await _reader.ReadAsync(linkedCts.Token);
                     if (response != null)
                     {
-                        _logger?.Invoke($"[{Name}] ← 接收：{BitConverter.ToString(response)}");
+                        _logger?.Invoke($"[{Name}] ← Received: {BitConverter.ToString(response)}");
 
                         if (cmd.ParseFunc != null && cmd.OnParsedResponse != null)
                         {
@@ -196,30 +210,28 @@ namespace SerialSharp
                 }
                 catch (OperationCanceledException ex)
                 {
-                    if (_cts.IsCancellationRequested)
+                    if (_channelCts.IsCancellationRequested)
                     {
-                        // 手动取消
-                        _logger?.Invoke($"[{Name}] 手动取消命令");
+                        _logger?.Invoke($"[{Name}] Command manually canceled.");
                         cmd.OnCanceled?.Invoke();
                     }
                     else if (timeoutCts!.IsCancellationRequested)
                     {
-                        // 读取超时
-                        _logger?.Invoke($"[{Name}] 读取超时取消");
-                        cmd.OnError?.Invoke(new TimeoutException("设备响应超时"));
+                        _logger?.Invoke($"[{Name}] Read timeout.");
+                        cmd.OnError?.Invoke(new TimeoutException("Device response timeout."));
                     }
 
-                    if (cmd.ClearQueueOnFailure) CancelPendingQueue();
+                    if (cmd.ClearQueueOnFailure) ClearPendingQueue();
                     cmd.CompletionSource.TrySetCanceled();
                     return;
                 }
                 catch (Exception ex)
                 {
-                    _logger?.Invoke($"[{Name}] 异常：{ex.Message} (第{attempt + 1}次)");
+                    _logger?.Invoke($"[{Name}] Error: {ex.Message} (Attempt {attempt + 1})");
                     if (++attempt > cmd.RetryCount)
                     {
                         cmd.OnError?.Invoke(ex);
-                        if (cmd.ClearQueueOnFailure) CancelPendingQueue();
+                        if (cmd.ClearQueueOnFailure) ClearPendingQueue();
 
                         cmd.CompletionSource.TrySetException(ex);
                         return;
@@ -235,19 +247,25 @@ namespace SerialSharp
             }
         }
 
+        /// <summary>
+        /// Stops the channel and cancels all ongoing operations.
+        /// </summary>
         public void Stop()
         {
-            _logger?.Invoke($"[{Name}] 通道已停止");
-            _cts.Cancel();
+            _logger?.Invoke($"[{Name}] Channel stopped.");
+            _channelCts.Cancel();
         }
 
+        /// <summary>
+        /// Cancels the currently running command and clears any pending commands in the queue.
+        /// </summary>
         public void CancelCurrentAndClearPending()
         {
-            _logger?.Invoke($"[{Name}] 中断当前命令并清空队列");
-            _cts.Cancel();
+            _logger?.Invoke($"[{Name}] Canceling current command and clearing queue.");
+            _channelCts.Cancel();
             while (_commandQueue.Reader.TryRead(out _)) { }
-            _cts.Dispose();
-            _cts = new CancellationTokenSource();
+            _channelCts.Dispose();
+            _channelCts = new CancellationTokenSource();
         }
     }
 }
