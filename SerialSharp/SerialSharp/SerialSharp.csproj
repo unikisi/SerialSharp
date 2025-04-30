@@ -4,7 +4,16 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <ApplicationIcon>desktop.ico</ApplicationIcon>
+    <Authors>Cass Fan</Authors>
+    <Company>Cass Fan</Company>
+    <Description>High-performance serial communication framework for .NET, with support for async command queueing, custom parsing, retry logic, and multiple reader strategies.</Description>
+    <PackageProjectUrl>https://github.com/unikisi/SerialSharp</PackageProjectUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="desktop.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SerialPortStream" Version="2.4.2" />
