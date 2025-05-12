@@ -32,9 +32,7 @@ namespace SerialSharp
             {
                 DataBits = portConfig.DataBits,
                 Parity = (Parity)portConfig.Parity,
-                StopBits = (StopBits)portConfig.StopBits,
-                ReadTimeout = 5000,
-                WriteTimeout = 5000
+                StopBits = (StopBits)portConfig.StopBits
             };
 
             _reader = protocolConfig.ReaderType switch
