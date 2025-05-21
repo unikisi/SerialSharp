@@ -7,9 +7,15 @@
     public class LengthBasedReaderConfig : BaseReaderConfig
     {
         /// <summary>
-        /// The index (zero-based) in the incoming byte array that contains the length of the data segment.
+        /// The index array(zero-based) in the incoming byte array that contains the length of the data segment.
         /// </summary>
-        public int DataSegmentsByteIndex { get; set; }
+        public required int[] DataSegmentsByteIndex { get; set; }
+
+        /// <summary>
+        /// Indicates whether the multi-byte length field is stored in big-endian format.
+        /// If true, the most significant byte comes first. If false, little-endian is assumed.
+        /// </summary>
+        public bool IsLengthFieldBigEndian { get; set; }
 
         /// <summary>
         /// The total number of bytes to add to the data segment length to calculate the full message length.

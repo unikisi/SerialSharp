@@ -2,6 +2,7 @@
 using SerialSharp.Reader.Config;
 using System.Buffers;
 using RJCP.IO.Ports;
+using SerialSharp.Utils;
 
 namespace SerialSharp.Reader
 {
@@ -46,9 +47,10 @@ namespace SerialSharp.Reader
                         totalBytesRead += bytesRead;
 
                         // Determine expected total length once enough bytes are available to read the length field
-                        if (totalBytesRead > config.DataSegmentsByteIndex && expectedPacketLength == 0)
+                        if (totalBytesRead >= GetLengthFieldEndIndex(config.DataSegmentsByteIndex) + 1
+                            && expectedPacketLength == 0)
                         {
-                            var dataSegmentLength = tempBuffer[config.DataSegmentsByteIndex];
+                            var dataSegmentLength = ProtocolParsingUtils.ReadLengthFromIndices(tempBuffer, config.DataSegmentsByteIndex, config.IsLengthFieldBigEndian);
                             expectedPacketLength = config.TotalExceptDataSegLength + dataSegmentLength;
 
                             if (expectedPacketLength > config.ReadMaxSize)
@@ -74,5 +76,8 @@ namespace SerialSharp.Reader
                 ArrayPool<byte>.Shared.Return(tempBuffer);
             }
         }
+
+        private static int GetLengthFieldEndIndex(int[] indices)
+            => indices.Length == 0 ? 0 : indices.Max();
     }
 }
