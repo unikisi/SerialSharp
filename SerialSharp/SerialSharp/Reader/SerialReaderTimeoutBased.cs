@@ -19,8 +19,12 @@ namespace SerialSharp.Reader
         /// Asynchronously reads data from the serial port until an inactivity timeout occurs or the operation is canceled.
         /// </summary>
         /// <param name="cancellationToken">Token used to cancel the operation.</param>
-        /// <returns>The full byte array received; throws if cancelled or if an error occurs.</returns>
-        public async Task<byte[]?> ReadAsync(CancellationToken cancellationToken = default)
+        /// <returns>
+        /// A tuple containing:
+        /// - The total number of bytes read.
+        /// - The complete received packet as a byte array, or null if the read was canceled or no valid packet was received.
+        /// </returns>
+        public async Task<(int, byte[]?)> ReadAsync(CancellationToken cancellationToken = default)
         {
             var receiveBuffer = new MemoryStream(); // Accumulates received bytes
             var tempBuffer = ArrayPool<byte>.Shared.Rent(config.ChunkSize); // Temporary buffer from the shared pool
@@ -52,7 +56,7 @@ namespace SerialSharp.Reader
                         // If idle for longer than the configured threshold and some data has been read, return it
                         if (idleDuration.TotalMilliseconds >= config.InactivityTimeoutMs && receiveBuffer.Length > 0)
                         {
-                            return receiveBuffer.ToArray();
+                            return (bytesAvailable, receiveBuffer.ToArray());
                         }
 
                         // Wait briefly to reduce CPU usage when no data is available

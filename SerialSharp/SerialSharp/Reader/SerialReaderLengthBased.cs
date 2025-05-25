@@ -24,7 +24,7 @@ namespace SerialSharp.Reader
         /// </summary>
         /// <param name="cancellationToken">Cancellation token to interrupt the read operation.</param>
         /// <returns>The received complete byte array, or throws an exception if cancelled or invalid.</returns>
-        public async Task<byte[]?> ReadAsync(CancellationToken cancellationToken = default)
+        public async Task<(int, byte[]?)> ReadAsync(CancellationToken cancellationToken = default)
         {
             var tempBuffer = ArrayPool<byte>.Shared.Rent(config.ChunkSize); // Temporary buffer to avoid heap allocations
             var expectedPacketLength = 0; // Expected total length of the packet
@@ -62,7 +62,7 @@ namespace SerialSharp.Reader
                         {
                             var result = new byte[expectedPacketLength];
                             Array.Copy(tempBuffer, result, expectedPacketLength);
-                            return result;
+                            return (totalBytesRead, result);
                         }
                     }
 

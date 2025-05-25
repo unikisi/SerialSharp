@@ -170,6 +170,7 @@ namespace SerialSharp
             {
                 CancellationTokenSource? timeoutCts = null;
                 CancellationTokenSource? linkedCts = null;
+                (int, byte[]?) response = default;
 
                 try
                 {
@@ -191,14 +192,14 @@ namespace SerialSharp
                     timeoutCts = new CancellationTokenSource(cmd.TimeoutMs);
                     linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_channelCts.Token, timeoutCts.Token);
 
-                    var response = await _reader.ReadAsync(linkedCts.Token);
-                    if (response != null)
+                    response = await _reader.ReadAsync(linkedCts.Token);
+                    if (response.Item2 != null)
                     {
-                        _logger?.Invoke($"[{Name}] ← Received: {BitConverter.ToString(response)}");
+                        _logger?.Invoke($"[{Name}] ← Received: {BitConverter.ToString(response.Item2)}");
 
-                        if (cmd.ParseFunc != null && cmd.OnParsedResponse != null)
+                        if (cmd is { ParseFunc: not null, OnParsedResponse: not null })
                         {
-                            var parsed = cmd.ParseFunc(response);
+                            var parsed = cmd.ParseFunc(response.Item2);
                             cmd.OnParsedResponse(parsed);
                         }
 
@@ -216,16 +217,16 @@ namespace SerialSharp
                     else if (timeoutCts!.IsCancellationRequested)
                     {
                         _logger?.Invoke($"[{Name}] Read timeout.");
-                        cmd.OnError?.Invoke(new TimeoutException("Device response timeout."));
+                        cmd.OnError?.Invoke(new TimeoutException($"Device response timeout. Length: {response.Item1}"));
                     }
 
                     if (cmd.ClearQueueOnFailure) ClearPendingQueue();
-                    cmd.CompletionSource.TrySetCanceled();
+                    cmd.CompletionSource.TrySetResult(false);
                     return;
                 }
                 catch (Exception ex)
                 {
-                    _logger?.Invoke($"[{Name}] Error: {ex.Message} (Attempt {attempt + 1})");
+                    _logger?.Invoke($"[{Name}] Error: {ex.Message} (Attempt {attempt + 1}) (Length: {response.Item1})");
                     if (++attempt > cmd.RetryCount)
                     {
                         cmd.OnError?.Invoke(ex);

@@ -7,10 +7,14 @@
     public interface ISerialReader
     {
         /// <summary>
-        /// Reads and returns a complete response packet from the serial port asynchronously.
+        /// Asynchronously reads a complete response packet from the serial port.
         /// </summary>
-        /// <param name="cancellationToken">A cancellation token to cancel the read operation.</param>
-        /// <returns>The received packet as a byte array, or null if the read failed or was canceled.</returns>
-        Task<byte[]?> ReadAsync(CancellationToken cancellationToken = default);
+        /// <param name="cancellationToken">A cancellation token that can be used to cancel the operation.</param>
+        /// <returns>
+        /// A tuple containing:
+        /// - The total number of bytes read.
+        /// - The complete received packet as a byte array, or null if the read was canceled or no valid packet was received.
+        /// </returns>
+        Task<(int, byte[]?)> ReadAsync(CancellationToken cancellationToken = default);
     }
 }
