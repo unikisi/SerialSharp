@@ -9,6 +9,7 @@
     <Company>Cass Fan</Company>
     <Description>High-performance serial communication framework for .NET, with support for async command queueing, custom parsing, retry logic, and multiple reader strategies.</Description>
     <PackageProjectUrl>https://github.com/unikisi/SerialSharp</PackageProjectUrl>
+	  <VersionPrefix>1.0.1</VersionPrefix>
   </PropertyGroup>
 
   <ItemGroup>
