@@ -174,6 +174,8 @@ namespace SerialSharp
 
                 try
                 {
+                    _serialPort.DiscardInBuffer();
+
                     _logger?.Invoke($"[{Name}] → Sending: {BitConverter.ToString(cmd.RequestBytes)} (Attempt {attempt + 1})");
                     await _serialPort.WriteAsync(cmd.RequestBytes, 0, cmd.RequestBytes.Length, _channelCts.Token);
 
