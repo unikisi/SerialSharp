@@ -6,20 +6,20 @@ namespace SerialSharp
     /// Manages multiple serial communication channels.
     /// Provides functionality to register, connect, send commands, and manage the lifecycle of serial channels.
     /// </summary>
-    public class SerialComManager(Action<string>? logger = null)
+    public class SerialComManager()
     {
         private readonly Dictionary<string, SerialComChannel> _channels = new();
-        private readonly Dictionary<string, (SerialPortConfig port, ProtocolConfig proto)> _channelConfigs = new();
+        private readonly Dictionary<string, (SerialPortConfig port, ProtocolConfig proto, Action<string>? logger)> _channelConfigs = new();
 
         /// <summary>
         /// Registers a new channel with the specified name and configuration.
         /// </summary>
-        public void RegisterChannel(string name, SerialPortConfig portConfig, ProtocolConfig protocolConfig)
+        public void RegisterChannel(string name, SerialPortConfig portConfig, ProtocolConfig protocolConfig, Action<string>? logger = null)
         {
             if (!_channels.ContainsKey(name))
             {
                 _channels[name] = new SerialComChannel(name, portConfig, protocolConfig, logger);
-                _channelConfigs[name] = (portConfig, protocolConfig);
+                _channelConfigs[name] = (portConfig, protocolConfig, logger);
             }
         }
 
@@ -62,9 +62,15 @@ namespace SerialSharp
         public void UpdateConfig(string channelName, SerialPortConfig config)
         {
             if (_channels.TryGetValue(channelName, out var channel))
+            {
                 channel.UpdateConfig(config);
+                if (_channelConfigs.TryGetValue(channelName, out var old))
+                    _channelConfigs[channelName] = (config, old.proto, old.logger);
+            }
             else
+            {
                 throw new InvalidOperationException($"Channel {channelName} is not registered.");
+            }
         }
 
         /// <summary>
@@ -105,13 +111,19 @@ namespace SerialSharp
         /// <summary>
         /// Restarts the specified channel using its previously registered configuration.
         /// </summary>
-        public void RestartChannel(string channelName)
+        public void RestartChannel(string channelName, Action<string>? overrideLogger = null)
         {
             StopChannel(channelName);
-            if (_channelConfigs.TryGetValue(channelName, out var config))
+
+            if (_channelConfigs.TryGetValue(channelName, out var cfg))
             {
-                _channels[channelName] = new SerialComChannel(channelName, config.port, config.proto, logger);
-                logger?.Invoke($"[{channelName}] Channel restarted.");
+                var effectiveLogger = overrideLogger ?? cfg.logger;
+                _channels[channelName] = new SerialComChannel(channelName, cfg.port, cfg.proto, effectiveLogger);
+                effectiveLogger?.Invoke($"[{channelName}] Channel restarted.");
+            }
+            else
+            {
+                throw new InvalidOperationException($"Channel {channelName} is not registered.");
             }
         }
 
